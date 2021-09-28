@@ -1,3 +1,9 @@
+#
+*.csv
+*.zip
+*.tar.gz
+*.tgz
+*.txt
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
