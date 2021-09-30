@@ -7,9 +7,11 @@ from collections import Counter
 def load_csv(path, **kwargs):
     return pd.read_csv(path, sep=',', header=0, **kwargs, low_memory=False)
 
-
-def load_users(path='users.csv'):
-    return load_csv(path, dtype={'user_id':str, 'city':str})
+def load_users(path, test_users):
+    result = load_csv(path, dtype={'user_id':str, 'city':str})
+    test_ids = set(test_users['user_id'])
+    result['in_test'] = result['user_id'].isin(test_ids).astype(int)
+    return result
 
 def parse_avg_bill(avg_bill:str) -> int:
     if avg_bill:
@@ -44,16 +46,33 @@ def load_reviews(path='reviews.csv', users_df=None, orgs_df=None):
                        dtype={'user_id':str, 'org_id':str, 'rating':float,'ts':int},
                        converters={'aspects': parse_list_ints})
     reviews_df['aspects_l']=reviews_df['aspects'].apply(len)
-    
+    reviews_df['rating'].fillna(0, inplace=True)
+
     if users_df is not None:
-        reviews_df = reviews_df.merge(users_df[['user_id','city']],on='user_id')
+        reviews_df = reviews_df.merge(users_df[['user_id','city','user_in_test']],on='user_id')
         reviews_df.rename({'city': 'user_city'}, axis=1, inplace=True)
     if orgs_df is not None:
         reviews_df = reviews_df.merge(orgs_df[['org_id','city']],on='org_id')
         reviews_df.rename({'city': 'org_city'}, axis=1, inplace=True)
+    user_agg = None
+    org_agg = None
     if 'org_city' in reviews_df and 'user_city' in reviews_df:
         reviews_df['travel'] = (reviews_df['org_city'] != reviews_df['user_city']).astype(int)
-    return reviews_df
+    
+        user_agg = reviews_df[['user_id','rating','aspects_l','travel']].groupby('user_id').aggregate({
+                'rating':['count',np.mean], 
+                'aspects_l':np.mean,
+                'travel':np.sum}
+        ).reset_index()
+        user_agg.columns = ['user_id','n_reviews','mean_score','mean_aspects','n_travels']
+        
+        org_agg = reviews_df[['org_id','rating','aspects_l','travel']].groupby('org_id').aggregate({
+                'rating':['count',np.mean], 
+                'aspects_l':np.mean,
+                'travel':np.sum}
+        ).reset_index()
+        org_agg.columns = ['org_id','n_reviews','mean_score','mean_aspects','n_travels']
+    return reviews_df, user_agg, org_agg
 
 #rubric_id,rubric_name
 def load_rubrics(path='rubrics.csv', orgs_df=None):
