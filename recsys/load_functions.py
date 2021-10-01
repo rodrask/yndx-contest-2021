@@ -49,7 +49,7 @@ def load_reviews(path='reviews.csv', users_df=None, orgs_df=None):
     reviews_df['rating'].fillna(0, inplace=True)
 
     if users_df is not None:
-        reviews_df = reviews_df.merge(users_df[['user_id','city','user_in_test']],on='user_id')
+        reviews_df = reviews_df.merge(users_df[['user_id','city','in_test']],on='user_id')
         reviews_df.rename({'city': 'user_city'}, axis=1, inplace=True)
     if orgs_df is not None:
         reviews_df = reviews_df.merge(orgs_df[['org_id','city']],on='org_id')
