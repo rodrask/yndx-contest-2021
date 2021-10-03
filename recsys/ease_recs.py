@@ -2,13 +2,17 @@ from sklearn.preprocessing import LabelEncoder
 from scipy import sparse
 import numpy as np
 
-def to_BB(cooc_m, l2):
-    return cooc_m + l2 * sparse.eye(cooc_m.shape[0])
+def prepare_items_4(reviews, users)
 
-def to_solution(BB, apply_fn=None):
-    if apply_fn:
-        inv_BB = np.linalg.inv(apply_fn(BB.todense())).astype(np.float32)
-    else:
-        inv_BB = np.linalg.inv(BB.todense()).astype(np.float32)
-    inv_BB /= np.diag(inv_BB)
-    return np.asarray(np.eye(inv_BB.shape[0]) - inv_BB).astype(np.float16)
+def ease_solution(X, l2):
+    CC_mat = X.T * X
+    CC_mat += l2 * sparse.eye(CC_mat.shape[0])
+    CC_mat = sparse.linalg.inv(CC_mat)
+    CC_mat /= np.diag(CC_mat)
+    return np.asarray(np.eye(CC_mat.shape[0]) - CC_mat)
+
+
+#test_users: user_id, [org_ids]
+def i2i_predict(i2i_mat, test_users, city_masks, user_enc, org_enc, N=20):
+    for row in test_users.iteritems():
+        pass

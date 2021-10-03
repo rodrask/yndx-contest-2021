@@ -27,17 +27,6 @@ def user_mnap(y_true, preds, N):
 def print_score(score):
     print(f'MNAP-score: {100*score:.2f}')
 
-#user_id 	city 	in_test 	n_reviews 	mean_score 	mean_aspects 	n_travels
-def select_test_split(reviews, users, min_ts=500, test_share=0.2):
-    potential_users = users[(users.n_travels>0) & (users.n_reviews>2)][['user_id']]
-    maybe_test_reviews = reviews[(reviews.rating>=4.0)&(reviews.travel>0)&(reviews.ts>min_ts)].merge(potential_users, on='user_id')
-    return maybe_test_reviews.\
-        sample(frac=test_share)[['user_id','user_city','org_id']]\
-        .groupby(['user_id','user_city'])\
-        .aggregate(np.array)\
-        .reset_index()\
-        .rename(columns={'org_id':'target','user_city':'city'})
-
 def top_recs(orgs, test_reviews, N=20):
     top_spb = orgs[(orgs.city=='spb')&(orgs.mean_score>4.8)].sort_values(by='n_reviews', ascending=False)[:N]['org_id'].to_numpy()
     top_msk = orgs[(orgs.city=='msk')&(orgs.mean_score>4.8)].sort_values(by='n_reviews', ascending=False)[:N]['org_id'].to_numpy()
