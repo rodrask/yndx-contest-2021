@@ -19,19 +19,6 @@ def msk_mask(orgs_df, orgs_encoder):
 def spb_mask(orgs_df, orgs_encoder):
     return city_mask(orgs_df, orgs_encoder, 'spb')
 
-
-def prepare_test_users(test_users, users_encoder, orgs_encoder):
-    test_users['user_idx'] = users_encoder.transform(test_users['user_id'])
-    test_users['target_idx'] = test_users['target'].apply(orgs_encoder.transform)
-    return test_users
-
-
-def reviews_matrix(reviews, users_encoder, orgs_encoder):
-    users_idx = users_encoder.transform(reviews['user_id'])
-    org_idx = orgs_encoder.transform(reviews['org_id'])
-    data = np.ones_like(users_idx)
-    return sparse.coo_matrix((data, (users_idx, org_idx))).tocsr()
-
 def aspects_matrix(reviews, users_encoder, aspects_encoder):
     exploded = reviews[reviews.aspects_l>0][['user_id','aspects']].explode('aspects')
     users_idx = users_encoder.transform(exploded['user_id'])
@@ -59,11 +46,3 @@ def train_test_split(reviews, users, min_ts=500, test_share=0.2):
     potential_reviews = reviews[(reviews.rating>=4.0)&(reviews.travel>0)&(reviews.ts>min_ts)]
     potential_reviews = potential_reviews.merge(potential_users, on='user_id')
 
-
-    maybe_test_reviews = reviews[(reviews.rating>=4.0)&(reviews.travel>0)&(reviews.ts>min_ts)].merge(potential_users, on='user_id')
-     maybe_test_reviews.\
-        sample(frac=test_share)[['user_id','user_city','org_id']]\
-        .groupby(['user_id','user_city'])\
-        .aggregate(np.array)\
-        .reset_index()\
-        .rename(columns={'org_id':'target','user_city':'city'})
