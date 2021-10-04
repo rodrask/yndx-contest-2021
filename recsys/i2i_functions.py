@@ -1,10 +1,10 @@
-from typing import NamedTuple
+from typing import Counter, NamedTuple
 from sklearn.preprocessing import LabelEncoder
 from scipy import sparse
 import numpy as np
 import pandas as pd
 from transform_functions import *
-from collections import namedtuple
+from collections import Counter
 
 class Encoders:
     def __init__(self, users_items, orgs_items) -> None:
@@ -18,15 +18,15 @@ class Encoders:
 
         msk_idxs = self.orgs_enc.transform(orgs_items[orgs_items['city'] == 'msk']['org_id'])
         msk_mask = np.zeros_like(self.orgs_enc.classes_, dtype=int) 
-        msk_mask[msk_idxs] = 1.0
+        msk_mask[msk_idxs] = 1
         
         spb_idxs = self.orgs_enc.transform(orgs_items[orgs_items['city'] == 'spb']['org_id'])
         spb_mask = np.zeros_like(self.orgs_enc.classes_, dtype=int) 
         spb_mask[spb_idxs] = 1
 
         self.pred_masks = {
-            'spb':msk_mask,
-            'msk':spb_mask
+            'spb':spb_mask,
+            'msk':msk_mask
         }
     
     def encode_users(self, users):
@@ -69,7 +69,7 @@ def CC_2_pmi(CC_mat):
     log_marg = np.log(0.01+marg_sum)
     substr = np.add.outer(log_marg, log_marg)
     CC_log = np.log(0.01+CC_mat.todense())
-    return log_total + CC_log - substr
+    return np.asarray(log_total + CC_log - substr)
 
 def CC_2_J(CC_mat):
     marg_sum = np.asarray(CC_mat.sum(axis=0)).reshape(-1)
@@ -83,6 +83,7 @@ def ease_solution(CC_mat, l2=0.01):
     CC_mat /= np.diag(CC_mat)
     return np.asarray(np.eye(CC_mat.shape[0]) - CC_mat)
 
+
 #test_users: user_id, city, [org_id]
 def i2i_predict(i2i_mat, test_users, encoders:Encoders, N=20):
     result = []
@@ -90,13 +91,42 @@ def i2i_predict(i2i_mat, test_users, encoders:Encoders, N=20):
         history = row.org_id
         orgs_idxs = encoders.encode_orgs(history)
         if len(orgs_idxs) > 0:
-            predicts = np.sum(i2i_mat[orgs_idxs,:], axis=0)
-            np.subtract(predicts,1000 * encoders.pred_masks[row.city], predicts)
-            predicts[orgs_idxs] -= 1000
+            predicts = np.sum(i2i_mat[orgs_idxs,:], axis=0) - 1e6 * encoders.pred_masks[row.city]
+            predicts[orgs_idxs] -= 1e6
             top_N = np.argpartition(-predicts, range(N))[:N]
-            result.append((row.user_id, encoders.decode_orgs(top_N), predicts[top_N]))
+            top_scores = [s for s in predicts[top_N] if s > 0]
+            top_N = top_N[:len(top_scores)]
+            result.append((row.user_id, row.city, encoders.decode_orgs(top_N), top_scores))
         else:
-            result.append((row.user_id, [], []))
-    return pd.DataFrame(result,columns=['user_id','target','target_values'])
+            result.append((row.user_id, row.city, [], []))
+    return pd.DataFrame(result,columns=['user_id','city','target','target_values'])
 
+
+def merge_ranks(ranks, weights, N=20):
+    final = Counter()
+    for rank, weight in zip(ranks,weights):
+        for pos,item in enumerate(rank, 1):
+            final[item] += weight * 1/pos
+    return [i[0] for i in  final.most_common(N)]
+
+
+def i2i_predict_merged(i2i_mats, i2i_weights, test_users, encoders:Encoders, N=20):
+    result = []
+    for row in test_users.itertuples():
+        history = row.org_id
+        orgs_idxs = encoders.encode_orgs(history)
+        if len(orgs_idxs) > 0:
+            ranks = []
+            for i2i in i2i_mats:
+                predicts = np.sum(i2i[orgs_idxs,:], axis=0) - 1e6 * encoders.pred_masks[row.city]
+                predicts[orgs_idxs] -= 1e6
+                top_N = np.argpartition(-predicts, range(N))[:N]
+                top_scores = [s for s in predicts[top_N] if s > 0]
+                top_N = top_N[:len(top_scores)]
+                ranks.append(top_N)
+            merged = merge_ranks(ranks, i2i_weights, N)
+            result.append((row.user_id, row.city, encoders.decode_orgs(merged)))
+        else:
+            result.append((row.user_id, row.city, []))
+    return pd.DataFrame(result,columns=['user_id','city','target'])
 
