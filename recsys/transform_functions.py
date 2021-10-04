@@ -1,6 +1,7 @@
 from sklearn.preprocessing import LabelEncoder
 from scipy import sparse
 import numpy as np
+import pandas as pd
 
 def index_items(items):
     encoder = LabelEncoder()
@@ -41,8 +42,34 @@ def rubric_matrix(orgs, orgs_encoder, rubrics_encoder):
     return sparse.coo_matrix((data, (orgs_idx, rubrics_idx))).tocsr()
 
 #user_id 	city 	in_test 	n_reviews 	mean_score 	mean_aspects 	n_travels
-def train_test_split(reviews, users, min_ts=500, test_share=0.2):
-    potential_users = users[(~users.in_test) & (users.n_travels>0) & (users.n_reviews>5)][['user_id']]
-    potential_reviews = reviews[(reviews.rating>=4.0)&(reviews.travel>0)&(reviews.ts>min_ts)]
-    potential_reviews = potential_reviews.merge(potential_users, on='user_id')
+def train_test_split(reviews, users, min_ts=500, frac=0.5, min_user_reviews=5):
+    potential_users = users[(~users.in_test) & (users.n_travels>0) & (users.n_reviews>=min_user_reviews)][['user_id']]
+    test_users = potential_users.sample(frac=frac)
+    target_reviews = reviews[(reviews.rating>=4.0)&(reviews.travel>0)&(reviews.ts>min_ts)]
+    target_reviews_set = set([(t.user_id, t.org_id) for t in target_reviews.itertuples()])
+
+    def split_reviews(row):
+        row['target'] = [o for o in row['org_id'] if (row['user_id'], o) in target_reviews_set]
+        row['org_id'] = [o for o in row['org_id'] if (row['user_id'], o) not in target_reviews_set]
+        return row
+        
+    test_users = test_users.merge(target_reviews, on='user_id')['user_id'].drop_duplicates()
+    test_reviews = reviews[['user_id','org_id']]\
+        .merge(test_users, on='user_id')\
+        .groupby('user_id')['org_id']\
+        .aggregate(list).reset_index()
+
+    test_reviews = test_reviews.apply(split_reviews, axis=1)
+    test_reviews = test_reviews[test_reviews.org_id.str.len()>0]    
+    test_reviews = test_reviews.merge(users[['user_id','city']], on='user_id')
+    test_reviews_flatten = pd.concat([test_reviews[['user_id','org_id']].explode('org_id'),
+                                   test_reviews[['user_id','target']].explode('target').rename(columns={'target':'org_id'})], 
+                                   ignore_index=True)
+    train_reviews = reviews.merge(test_reviews_flatten, on=('user_id','org_id'), how="left", indicator=True)
+
+    train_reviews = train_reviews[train_reviews._merge=='left_only'].drop(columns=['_merge'])
+    train_reviews = train_reviews.merge(users[['user_id','city']], on='user_id')
+    return train_reviews, test_reviews
+
+    
 
