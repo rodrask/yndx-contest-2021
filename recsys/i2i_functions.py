@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from transform_functions import *
 from collections import Counter
+from pandarallel import pandarallel
 
 class Encoders:
     def __init__(self, users_items, orgs_items) -> None:
@@ -51,9 +52,16 @@ class Encoders:
     def decode_orgs(self, orgs_idxs):
         return self.orgs_enc.inverse_transform(orgs_idxs)
         
-def prepare_reviews_i2i(reviews, users, orgs, min_reviews_per_user=5, min_travels_reviews=2):
+def prepare_reviews_i2i(reviews, users, orgs, 
+                        min_reviews_per_user, 
+                        min_org_reviews,
+                        min_travels_reviews,
+                        min_org_score):
     users = users[users.n_reviews>=min_reviews_per_user]['user_id']
-    orgs = orgs[orgs.n_travels>min_travels_reviews][['org_id','city']]
+    orgs = orgs[(orgs.mean_score>=min_org_score) & \
+                (orgs.n_travels>=min_travels_reviews) & \
+                (orgs.n_reviews>=min_org_reviews)][['org_id','city']]
+    
     reviews = reviews[reviews.rating>=4.0].merge(users, on='user_id').merge(orgs['org_id'], on='org_id')
     return (reviews, Encoders(users, orgs))
 
@@ -63,7 +71,17 @@ def reviews_matrix(reviews, encoders):
     data = np.ones_like(users_idx)
     return sparse.coo_matrix((data, (users_idx, org_idx))).tocsr()
 
-def CC_2_pmi(CC_mat):
+def filter_by_min_value(CC_mat, min_value):
+    CC_mat = CC_mat.copy()
+    nonzero_mask = np.array(CC_mat[CC_mat.nonzero()] < min_value)[0]
+    rows = CC_mat.nonzero()[0][nonzero_mask]
+    cols = CC_mat.nonzero()[1][nonzero_mask]
+    CC_mat[rows, cols] = 0
+    CC_mat.eliminate_zeros()
+    return CC_mat
+
+def CC_2_pmi(CC_mat, min_CC=10):
+    CC_mat = filter_by_min_value(CC_mat, min_CC)
     marg_sum = np.asarray(CC_mat.sum(axis=1)).reshape(-1)
     log_total = np.log(marg_sum.sum())
     log_marg = np.log(0.01+marg_sum)
@@ -86,8 +104,8 @@ def ease_solution(CC_mat, l2=0.01):
 
 #test_users: user_id, city, [org_id]
 def i2i_predict(i2i_mat, test_users, encoders:Encoders, N=20):
-    result = []
-    for row in test_users.itertuples():
+    out_index = ['user_id','city','target','target_values']
+    def _apply(row):
         history = row.org_id
         orgs_idxs = encoders.encode_orgs(history)
         if len(orgs_idxs) > 0:
@@ -96,10 +114,11 @@ def i2i_predict(i2i_mat, test_users, encoders:Encoders, N=20):
             top_N = np.argpartition(-predicts, range(N))[:N]
             top_scores = [s for s in predicts[top_N] if s > 0]
             top_N = top_N[:len(top_scores)]
-            result.append((row.user_id, row.city, encoders.decode_orgs(top_N), top_scores))
+            data = (row.user_id, row.city, encoders.decode_orgs(top_N), top_scores)
         else:
-            result.append((row.user_id, row.city, [], []))
-    return pd.DataFrame(result,columns=['user_id','city','target','target_values'])
+            data = (row.user_id, row.city, [], [])
+        return pd.Series(data, index=out_index)
+    return test_users.parallel_apply(_apply, axis=1)
 
 
 def merge_ranks(ranks, weights, N=20):

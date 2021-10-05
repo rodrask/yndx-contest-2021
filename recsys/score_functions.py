@@ -1,28 +1,49 @@
 import pandas as pd
 import numpy as np
+from pandarallel import pandarallel
+
 pd.options.mode.chained_assignment = None  # default='warn'
 
 # Df format: user_id [org_ids,...] 
 # Columns: user_id, target
 def mnap(y_true, y_predict, N=20):
     match = y_true.merge(y_predict, on='user_id')
-    return match.apply(lambda r: user_mnap(r['target_x'],r['target_y'], N), axis=1).mean()
 
-def recall(y_true, y_predict):
+    def _user_mnap(y_true, preds, N):
+        preds = preds[:N]
+        scores = np.zeros_like(preds)
+        weights = np.array([1/idx for idx in range(1, len(preds)+1)])
+        for idx, pred in enumerate(preds, 1):
+            if pred in y_true:
+                scores[idx-1] = 1 
+        return np.sum(np.cumsum(scores)*scores / weights) / min(len(y_true), N)
+    return match.parallel_apply(lambda r: _user_mnap(r['target_x'],r['target_y'], N), axis=1).mean()
+
+def recall(y_true, y_predict,N=20):
     match = y_true.merge(y_predict, on='user_id')
-    return match.apply(lambda r: user_recall(r['target_x'],r['target_y']), axis=1).mean()
+    def _user_recall(y_true, preds):
+        return len(np.intersect1d(y_true, preds)) / (0.0001+len(y_true))
+    return match.parallel_apply(lambda r: _user_recall(r['target_x'],r['target_y'][:N]), axis=1).mean()
 
-def user_recall(y_true, preds):
-    return len(np.intersect1d(y_true, preds)) / len(y_true)
-         
-def user_mnap(y_true, preds, N):
-    preds = preds[:N]
-    scores = np.zeros_like(preds)
-    weights = np.array([1/idx for idx in range(1, len(preds)+1)])
-    for idx, pred in enumerate(preds, 1):
-        if pred in y_true:
-            scores[idx-1] = 1 
-    return np.sum(np.cumsum(scores)*scores / weights) / min(len(y_true), N)
+def compare_ranks(y_true, y_predict_x, y_predict_y, cols):
+    match = y_true.merge(y_predict_x, on='user_id', suffixes=('_true',''))
+    match = match.merge(y_predict_y, on='user_id', suffixes=('_x','_y'))
+    def pair_intersection(y_true, preds):
+        return len(np.intersect1d(y_true, preds))
+    def triple_union(y_true, preds_x, preds_y):
+        inter_x = np.intersect1d(y_true, preds_x)
+        inter_y = np.intersect1d(y_true, preds_y)
+        return len(np.union1d(inter_x, inter_y))
+    def _apply(row):
+        row[cols[0]] = pair_intersection(row['target_true'],row['target_x'])
+        row[cols[1]] = pair_intersection(row['target_true'],row['target_y'])
+        row[f'{cols[0]}_{cols[1]}'] = triple_union(row['target_true'], row['target_x'], row['target_y'])
+        return row
+
+    result = match.parallel_apply(_apply, axis=1)[[cols[0],cols[1],f'{cols[0]}_{cols[1]}']]
+    result[f'imp_{cols[0]}'] = result[f'{cols[0]}_{cols[1]}'] - result[cols[1]]
+    result[f'imp_{cols[1]}'] = result[f'{cols[0]}_{cols[1]}'] - result[cols[0]]
+    return result
 
 def print_score(score):
     print(f'MNAP-score: {100*score:.2f}')
