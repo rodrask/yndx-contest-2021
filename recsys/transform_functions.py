@@ -3,11 +3,6 @@ from scipy import sparse
 import numpy as np
 import pandas as pd
 
-def index_items(items):
-    encoder = LabelEncoder()
-    encoder.fit(items)
-    return encoder
-
 def city_mask(orgs_df, orgs_encoder, city):
     idxs = orgs_encoder.transform(orgs_df[orgs_df.city==city]['org_id'])
     mask = np.zeros_like(orgs_encoder.classes_)
@@ -68,6 +63,3 @@ def train_test_split(reviews, users,min_user_reviews, min_ts, frac ):
     train_reviews = train_reviews[train_reviews._merge=='left_only'].drop(columns=['_merge'])
     train_reviews = train_reviews.merge(users[['user_id','city']], on='user_id')
     return train_reviews, test_reviews
-
-    
-
