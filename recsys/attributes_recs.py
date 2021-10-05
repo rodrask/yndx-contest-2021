@@ -19,17 +19,18 @@ class AttrEncoders:
         features_idx = self.feature_enc.transform(exploded['features_id'])
         data = np.ones_like(orgs_idx)
         self.features_mat = sparse.coo_matrix((data, (orgs_idx, features_idx))).tocsr()
-
-    def predict(self, org_ids):
-        pass
-
-    def get_features(self, org_ids):
-        org_idxs = self.org_enc.transform(org_ids)
-        return  self.features_mat[org_idxs,:].sum(axis=0) * self.idf_weight
-
+        
+    
     def build_feature_org_mat(self, i2i_mat, encoders:Encoders):
         idxs = range(i2i_mat.shape[0])
         org_ids = encoders.decode_orgs(idxs)
         org_idxs = self.org_enc.transform(org_ids)
         features = self.features_mat[org_idxs,:]
-        features
+        self.feature_2_item = np.matmul(i2i_mat, features.toarray()).T
+    
+    def _get_features(self, org_ids):
+        org_idxs = self.org_enc.transform(org_ids)
+        return  self.features_mat[org_idxs,:].sum(axis=0) * self.idf_weight
+
+    def predict(self, city, org_ids):
+        feature_vec = self._get_features(org_ids)
