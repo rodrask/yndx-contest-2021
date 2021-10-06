@@ -101,7 +101,6 @@ def ease_solution(CC_mat, l2=0.01):
     CC_mat /= np.diag(CC_mat)
     return np.asarray(np.eye(CC_mat.shape[0]) - CC_mat)
 
-
 #test_users: user_id, city, [org_id]
 def i2i_predict(i2i_mat, test_users, encoders:Encoders, N=20):
     out_index = ['user_id','city','target','target_values']
