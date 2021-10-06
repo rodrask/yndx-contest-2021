@@ -38,6 +38,7 @@ def load_orgs(path='organisations.csv'):
     orgs_df['average_bill'].astype(int)
     orgs_df['rubrics_l'] = orgs_df['rubrics_id'].apply(len)
     orgs_df['features_l'] = orgs_df['features_id'].apply(len)
+    orgs_df['combined_id'] = orgs_df.apply(lambda r: r['rubrics_id']+r['features_id'], axis=1)
     return orgs_df
 
 #user_id,org_id,rating,ts,aspects
@@ -73,6 +74,18 @@ def load_reviews(path='reviews.csv', users_df=None, orgs_df=None):
         ).reset_index()
         org_agg.columns = ['org_id','n_reviews','mean_score','mean_aspects','n_travels']
     return reviews_df, user_agg, org_agg
+
+def load_combined(paths, orgs_df):
+    dfs = [load_csv(path=p, 
+            names=['combined_id', 'combined_name'],
+            dtype={'combined_id':int, 'combined_name':str}) for p in paths]
+    result = pd.concat(dfs, ignore_index=True)
+    result = pd.merge(result, items_popularity(orgs_df, 'combined_id'), 
+                        left_on='combined_id', 
+                        right_on='combined_id', 
+                        how='left').sort_values(by='count', ascending=False)
+    return result
+
 
 #rubric_id,rubric_name
 def load_rubrics(path='rubrics.csv', orgs_df=None):
