@@ -8,20 +8,22 @@ from collections import Counter
 from pandarallel import pandarallel
 
 class Encoders:
-    def __init__(self, users_items, orgs_items) -> None:
+    def __init__(self, reviews) -> None:
         self.users_enc = LabelEncoder()
+        users_items = reviews['user_id'].drop_duplicates()
         self.in_users = set(users_items)
         self.users_enc.fit(users_items)
 
         self.orgs_enc = LabelEncoder()
+        orgs_items = reviews[['org_id','org_city']].drop_duplicates()
         self.in_orgs = set(orgs_items['org_id'])
         self.orgs_enc.fit(orgs_items['org_id'])
 
-        msk_idxs = self.orgs_enc.transform(orgs_items[orgs_items['city'] == 'msk']['org_id'])
+        msk_idxs = self.orgs_enc.transform(orgs_items[orgs_items['org_city'] == 'msk']['org_id'])
         msk_mask = np.zeros_like(self.orgs_enc.classes_, dtype=int) 
         msk_mask[msk_idxs] = 1
         
-        spb_idxs = self.orgs_enc.transform(orgs_items[orgs_items['city'] == 'spb']['org_id'])
+        spb_idxs = self.orgs_enc.transform(orgs_items[orgs_items['org_city'] == 'spb']['org_id'])
         spb_mask = np.zeros_like(self.orgs_enc.classes_, dtype=int) 
         spb_mask[spb_idxs] = 1
 
@@ -52,18 +54,25 @@ class Encoders:
     def decode_orgs(self, orgs_idxs):
         return self.orgs_enc.inverse_transform(orgs_idxs)
         
-def prepare_reviews_i2i(reviews, users, orgs, 
+def prepare_reviews_i2i(reviews, orgs, 
                         min_reviews_per_user, 
                         min_org_reviews,
                         min_travels_reviews,
                         min_org_score):
-    users = users[users.n_reviews>=min_reviews_per_user]['user_id']
-    orgs = orgs[(orgs.mean_score>=min_org_score) & \
-                (orgs.n_travels>=min_travels_reviews) & \
-                (orgs.n_reviews>=min_org_reviews)][['org_id','city']]
+    orgs = orgs[orgs.rating>=min_org_score]['org_id']
+    reviews = reviews[reviews.good>0].merge(orgs, on='org_id')
+
+    user_agg = reviews.groupby("user_id").agg(
+        user_reviews = pd.NamedAgg(column="org_id", aggfunc="count")).reset_index()
+    user_agg = user_agg[user_agg.user_reviews>=min_reviews_per_user]['user_id']
+    reviews = reviews.merge(user_agg, on='user_id')
     
-    reviews = reviews[reviews.rating>=4.0].merge(users, on='user_id').merge(orgs['org_id'], on='org_id')
-    return (reviews, Encoders(users, orgs))
+    org_agg = reviews.groupby("org_id").agg(
+        org_reviews = pd.NamedAgg(column="org_id", aggfunc="count"),
+        org_travels = pd.NamedAgg(column="travel", aggfunc="sum")).reset_index()
+    org_agg = org_agg[(org_agg.org_travels>=min_travels_reviews) & (org_agg.org_reviews>=min_org_reviews)]['org_id']
+    reviews = reviews.merge(org_agg, on='org_id')
+    return (reviews, Encoders(reviews))
 
 def reviews_matrix(reviews, encoders):
     users_idx = encoders.encode_users(reviews['user_id'])

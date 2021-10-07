@@ -35,45 +35,30 @@ def load_orgs(path='organisations.csv'):
                       converters={'average_bill':parse_avg_bill, 
                                   'rubrics_id':parse_list_ints,
                                   'features_id':parse_list_ints})
+    orgs_df['rating'].fillna(0, inplace=True)                             
     orgs_df['average_bill'].astype(int)
-    orgs_df['rubrics_l'] = orgs_df['rubrics_id'].apply(len)
-    orgs_df['features_l'] = orgs_df['features_id'].apply(len)
     orgs_df['combined_id'] = orgs_df.apply(lambda r: r['rubrics_id']+r['features_id'], axis=1)
     return orgs_df
 
 #user_id,org_id,rating,ts,aspects
-def load_reviews(path='reviews.csv', users_df=None, orgs_df=None):
+def load_reviews(path, users_df, orgs_df):
     reviews_df = load_csv(path,  
                        dtype={'user_id':str, 'org_id':str, 'rating':float,'ts':int},
                        converters={'aspects': parse_list_ints})
-    reviews_df['aspects_l']=reviews_df['aspects'].apply(len)
     reviews_df['rating'].fillna(0, inplace=True)
+    reviews_df['good'] = (reviews_df.rating>=4.0).astype(int)
 
-    if users_df is not None:
-        reviews_df = reviews_df.merge(users_df[['user_id','city','in_test']],on='user_id')
-        reviews_df.rename({'city': 'user_city'}, axis=1, inplace=True)
-    if orgs_df is not None:
-        reviews_df = reviews_df.merge(orgs_df[['org_id','city']],on='org_id')
-        reviews_df.rename({'city': 'org_city'}, axis=1, inplace=True)
-    user_agg = None
-    org_agg = None
-    if 'org_city' in reviews_df and 'user_city' in reviews_df:
-        reviews_df['travel'] = (reviews_df['org_city'] != reviews_df['user_city']).astype(int)
+    reviews_df = reviews_df.merge(users_df[['user_id','city','in_test']], on='user_id')
+    reviews_df.rename({'city': 'user_city'}, axis=1, inplace=True)
+    reviews_df = reviews_df.merge(orgs_df[['org_id','city']],on='org_id')
+    reviews_df.rename({'city': 'org_city'}, axis=1, inplace=True)
+    reviews_df['travel'] = (reviews_df['org_city'] != reviews_df['user_city']).astype(int)
     
-        user_agg = reviews_df[['user_id','rating','aspects_l','travel']].groupby('user_id').aggregate({
-                'rating':['count',np.mean], 
-                'aspects_l':np.mean,
-                'travel':np.sum}
-        ).reset_index()
-        user_agg.columns = ['user_id','n_reviews','mean_score','mean_aspects','n_travels']
-        
-        org_agg = reviews_df[['org_id','rating','aspects_l','travel']].groupby('org_id').aggregate({
-                'rating':['count',np.mean], 
-                'aspects_l':np.mean,
-                'travel':np.sum}
-        ).reset_index()
-        org_agg.columns = ['org_id','n_reviews','mean_score','mean_aspects','n_travels']
-    return reviews_df, user_agg, org_agg
+    return reviews_df
+def enrich_orgs(orgs_df, reviews):
+    n_reviews = reviews.groupby("org_id")['user_id'].agg(
+        n_reviews='count')
+    return orgs_df.merge(n_reviews, on="org_id")
 
 def load_combined(paths, orgs_df):
     dfs = [load_csv(path=p, 

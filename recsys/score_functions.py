@@ -50,8 +50,9 @@ def print_score(score):
 
 
 def fallback_with_top_recs(test_reviews, orgs, N=20):
-    top_spb = orgs[(orgs.city=='spb')&(orgs.mean_score>4.8)].sort_values(by='n_reviews', ascending=False)[:N]['org_id'].to_numpy()
-    top_msk = orgs[(orgs.city=='msk')&(orgs.mean_score>4.8)].sort_values(by='n_reviews', ascending=False)[:N]['org_id'].to_numpy()
+
+    top_spb = orgs[(orgs.city=='spb')&(orgs.rating>4.8)].sort_values(by='n_reviews', ascending=False)[:N]['org_id'].to_numpy()
+    top_msk = orgs[(orgs.city=='msk')&(orgs.rating>4.8)].sort_values(by='n_reviews', ascending=False)[:N]['org_id'].to_numpy()
     top_dict={
         'msk':top_spb,
         'spb':top_msk
@@ -75,3 +76,15 @@ def validate_preds(preds, orgs_df, users_df, N=20):
         assert len(orgs_cities) <= N
         assert user_city not in orgs_cities, f"{row.user_id} {user_city} {row.target} {orgs_cities}"
     print("All good")
+
+
+def combine_preds(train_df, ease, attrs, min_len=4):
+    preds_combined = pd.merge(ease, attrs, on='user_id',suffixes=('_e','_a'))
+    preds_combined = preds_combined.merge(train_df[['user_id','org_id']], on='user_id')
+    def _apply(row):
+        index = ['user_id', 'city', 'target']
+        if len(row['org_id']) <= min_len:
+            return pd.Series(data=(row['user_id'], row['city_a'], row['target_a']), index=index)
+        else:
+            return pd.Series(data=(row['user_id'], row['city_e'], row['target_e']), index=index)
+    return preds_combined.apply(_apply, axis=1)

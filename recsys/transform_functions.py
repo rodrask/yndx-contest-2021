@@ -37,10 +37,10 @@ def rubric_matrix(orgs, orgs_encoder, rubrics_encoder):
     return sparse.coo_matrix((data, (orgs_idx, rubrics_idx))).tocsr()
 
 #user_id 	city 	in_test 	n_reviews 	mean_score 	mean_aspects 	n_travels
-def train_test_split(reviews, users,min_user_reviews, min_ts, frac ):
-    potential_users = users[(~users.in_test) & (users.n_travels>0) & (users.n_reviews>=min_user_reviews)][['user_id']]
+def train_test_split(reviews, users, min_ts, frac ):
+    potential_users = users[users.in_test==0][['user_id']]
     test_users = potential_users.sample(frac=frac)
-    target_reviews = reviews[(reviews.rating>=4.0)&(reviews.travel>0)&(reviews.ts>=min_ts)]
+    target_reviews = reviews[(reviews.good > 0)&(reviews.travel > 0)&(reviews.ts >= min_ts)]
     target_reviews_set = set([(t.user_id, t.org_id) for t in target_reviews.itertuples()])
 
     def split_reviews(row):
