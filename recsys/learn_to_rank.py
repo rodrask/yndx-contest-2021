@@ -2,7 +2,7 @@
 from _typeshed import Self
 import catboost
 from catboost.core import CatBoost, Pool
-
+import pandas as pd
 
 class PoolBuilder:
     def __init__(self, users_df, orgs_df) -> None:
@@ -24,18 +24,21 @@ class PoolBuilder:
 
 
     def build_pool(self, train_df, is_test=False):
-        pool = Pool()
-        def _apply(row):
-            user_vector = self.get_user_vector(row['user_id'])
-            for org_id in row['preds']:
-                org_vector = self.get_org_vector(org_id)
-                if is_test:
-                    target = int(org_id in row['true_preds'])
-                    result = self.combine_vecs(user_vector, org_vector, target)
-                else:
-                    result = self.combine_vecs(user_vector, org_vector)
-                return result
-        return Pool(train_df.parallel_apply(_apply, axis=1))
+        true_pairs = train_df[['user_id','true_preds']]\
+            .explode('true_preds')\
+            .rename(columns={'true_preds':'org_id'})
+        true_pairs['label'] = 1
+        rest_pairs = train_df[['user_id','preds']]\
+            .explode('preds')\
+            .rename(columns={'preds':'org_id'})
+        true_pairs['label'] = 0
+        all_pairs = pd.concat([true_pairs, rest_pairs],ignore_index=True)
+        all_pairs.drop_duplicates(subset=['user_id','org_id'], inplace=True)
+        self.attach_user_vector(all_pairs)
+        self.attach_org_vector(all_pairs)
+        self.combine_columns(all_pairs)
+        return Pool(all_pairs,label="label",group_id="user_id")
+
 
 def train_model(pool, params):
     model = catboost.CatBoost(params)
