@@ -8,6 +8,7 @@ pd.options.mode.chained_assignment = None  # default='warn'
 # Columns: user_id, target
 def mnap(y_true, y_predict, N=20):
     match = y_true.merge(y_predict, on='user_id')
+    assert len(match) == len(y_true)
 
     def _user_mnap(y_true, preds, N):
         preds = preds[:N]
@@ -21,6 +22,7 @@ def mnap(y_true, y_predict, N=20):
 
 def recall(y_true, y_predict,N=20):
     match = y_true.merge(y_predict, on='user_id')
+    assert len(match) == len(y_true)
     def _user_recall(y_true, preds):
         return len(np.intersect1d(y_true, preds)) / (0.0001+len(y_true))
     return match.parallel_apply(lambda r: _user_recall(r['target_x'],r['target_y'][:N]), axis=1).mean()
@@ -50,14 +52,13 @@ def print_score(score):
 
 
 def fallback_with_top_recs(test_reviews, orgs, N=20):
-
     top_spb = orgs[(orgs.city=='spb')&(orgs.rating>4.8)].sort_values(by='n_reviews', ascending=False)[:N]['org_id'].to_numpy()
     top_msk = orgs[(orgs.city=='msk')&(orgs.rating>4.8)].sort_values(by='n_reviews', ascending=False)[:N]['org_id'].to_numpy()
     top_dict={
         'msk':top_spb,
         'spb':top_msk
     }
-    result = test_reviews[['user_id']]
+    result = test_reviews[['user_id','city']]
     result['target'] = test_reviews.apply(lambda r: top_dict[r['city']] if len(r['target'])== 0 else r['target'], axis=1)
     return result
 
@@ -69,11 +70,13 @@ def save_predictions(preds, path='answers.csv'):
 def validate_preds(preds, orgs_df, users_df, N=20):
     org2_city = {r.org_id:r.city for r in orgs_df.itertuples()}
     user2_city = {r.user_id:r.city for r in users_df.itertuples()}
-    assert len(preds) == sum(users_df.in_test)
+    if N > 0:
+        assert len(preds) == sum(users_df.in_test)
     for row in preds.itertuples():
         user_city = user2_city[row.user_id]
         orgs_cities = [org2_city[o] for o in row.target]
-        assert len(orgs_cities) <= N
+        if N >0:
+            assert len(orgs_cities) <= N
         assert user_city not in orgs_cities, f"{row.user_id} {user_city} {row.target} {orgs_cities}"
     print("All good")
 
@@ -87,4 +90,12 @@ def combine_preds(train_df, ease, attrs, min_len=4):
             return pd.Series(data=(row['user_id'], row['city_a'], row['target_a']), index=index)
         else:
             return pd.Series(data=(row['user_id'], row['city_e'], row['target_e']), index=index)
-    return preds_combined.apply(_apply, axis=1)
+    return preds_combined.parallel_apply(_apply, axis=1)
+
+def concat_preds(ease, attrs):
+    preds_combined = pd.merge(ease, attrs, on='user_id',suffixes=('_e','_a'))
+    def _apply(row):
+        index = ['user_id', 'city', 'target']
+        target = np.union1d(row.target_a, row.target_e)
+        return pd.Series(data=(row['user_id'], row['city_a'], target), index=index)
+    return preds_combined.parallel_apply(_apply, axis=1)
