@@ -54,24 +54,31 @@ class Encoders:
     def decode_orgs(self, orgs_idxs):
         return self.orgs_enc.inverse_transform(orgs_idxs)
         
-def prepare_reviews_i2i(reviews, orgs, 
+def prepare_reviews_i2i(reviews, orgs,
+                        train_pairs, test_pairs,
                         min_reviews_per_user, 
                         min_org_reviews,
                         min_travels_reviews,
                         min_org_score):
-    orgs = orgs[orgs.rating>=min_org_score]['org_id']
-    reviews = reviews[reviews.good>0].merge(orgs, on='org_id')
+    reviews = reviews[reviews.good>0]
 
+    reviews = reviews.merge(test_pairs, on=('user_id','org_id'), how='left', indicator=True)
+    reviews = reviews[reviews['_merge']=="left_only"]
+
+    train_reviews = reviews.merge(train_pairs, on=('user_id','org_id'))
+
+    reviews = reviews[reviews.org_id.isin((orgs[orgs.rating>=min_org_score]['org_id']))]
     user_agg = reviews.groupby("user_id").agg(
         user_reviews = pd.NamedAgg(column="org_id", aggfunc="count")).reset_index()
     user_agg = user_agg[user_agg.user_reviews>=min_reviews_per_user]['user_id']
-    reviews = reviews.merge(user_agg, on='user_id')
+    reviews = reviews[reviews.user_id.isin(user_agg)]
     
     org_agg = reviews.groupby("org_id").agg(
         org_reviews = pd.NamedAgg(column="org_id", aggfunc="count"),
         org_travels = pd.NamedAgg(column="travel", aggfunc="sum")).reset_index()
     org_agg = org_agg[(org_agg.org_travels>=min_travels_reviews) & (org_agg.org_reviews>=min_org_reviews)]['org_id']
-    reviews = reviews.merge(org_agg, on='org_id')
+    reviews = reviews[reviews.org_id.isin(org_agg)]
+    reviews = pd.concat([train_reviews, reviews], ignore_index=True).drop_duplicates(('user_id','org_id'))
     return (reviews, Encoders(reviews))
 
 def reviews_matrix(reviews, encoders):

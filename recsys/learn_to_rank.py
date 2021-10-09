@@ -5,6 +5,8 @@ import numpy as np
 from collections import namedtuple
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from score_functions import recall
+
 TrainData = namedtuple("TrainData", ["pairs", "groups", "labels","org_ids"])
 TestData = namedtuple("TestData", ["pairs", "groups", "org_ids"])
 
@@ -107,7 +109,8 @@ class PoolBuilder:
         users_reviews = self.reviews.merge(users, on='user_id')
         users_reviews = self.attach_orgs_df(users_reviews)
 
-        users_reviews = users_reviews.groupby('user_id').apply(_user_aggregate, self.aspect_transformer).reset_index().fillna(0)
+        users_reviews = users_reviews.groupby('user_id')\
+            .apply(_user_aggregate, self.aspect_transformer).reset_index().fillna(0)
         pairs = pairs.merge(users_reviews, on='user_id')
         return pairs
     
@@ -135,29 +138,51 @@ class PoolBuilder:
         test_pairs.drop(columns=["user_id", "org_id"], inplace=True)
         return TestData(test_pairs, groups, org_ids)
 
+    def build_big_pool(self, train_df, true_df):
+            train_pairs = train_df[['user_id','city','target']]\
+                .explode('target')\
+                .rename(columns={'target':'org_id'})\
+                .dropna()
+            train_pairs['label'] = 0
+            true_pairs = true_df[['user_id','city','target']]\
+                .explode('target')\
+                .rename(columns={'target':'org_id'})
+            true_pairs['label'] = 1
+            all_pairs = pd.concat([train_pairs, true_pairs],ignore_index=True)
+            all_pairs.drop_duplicates(subset=['user_id','org_id'],keep='last', inplace=True)
+            all_pairs.rename(columns={"city": "user_city"}, inplace=True)
+            all_pairs = self.attach_user_vector(all_pairs)
+            all_pairs = self.attach_org_vector(all_pairs)
+            # self.combine_columns(all_pairs)
+            all_pairs.sort_values(by="user_id", inplace=True)
+            groups = all_pairs["user_id"].to_numpy()
+            label = all_pairs.label.to_numpy()
+            org_ids = all_pairs["org_id"]
+            all_pairs.drop(columns=["user_id", "org_id", "label"], inplace=True)
+            return TrainData(all_pairs, groups, label, org_ids)
 
     def build_pool(self, train_df, true_df):
-        train_pairs = train_df[['user_id','city','target']]\
-            .explode('target')\
-            .rename(columns={'target':'org_id'})\
-            .dropna()
-        train_pairs['label'] = 0
-        true_pairs = true_df[['user_id','city','target']]\
+        train_recall = recall(true_df, train_df)
+        true_pairs = true_df[['user_id','target']]\
             .explode('target')\
             .rename(columns={'target':'org_id'})
-        true_pairs['label'] = 1
-        all_pairs = pd.concat([train_pairs, true_pairs],ignore_index=True)
-        all_pairs.drop_duplicates(subset=['user_id','org_id'],keep='last', inplace=True)
-        all_pairs.rename(columns={"city": "user_city"}, inplace=True)
-        all_pairs = self.attach_user_vector(all_pairs)
-        all_pairs = self.attach_org_vector(all_pairs)
+
+        labels_one = set([(t.user_id, t.org_id) for t in true_pairs.itertuples()])
+        train_pairs = train_df[train_recall>0][['user_id','city','target']]\
+            .explode('target')\
+            .rename(columns={'target':'org_id', "city": "user_city"})
+        train_pairs['label'] = train_pairs.apply(lambda r: (r.user_id, r.org_id) in labels_one, axis=1)
+        train_pairs['label'] = train_pairs['label'].astype(int)
+
+        train_pairs = self.attach_user_vector(train_pairs)
+        train_pairs = self.attach_org_vector(train_pairs)
         # self.combine_columns(all_pairs)
-        all_pairs.sort_values(by="user_id", inplace=True)
-        groups = all_pairs["user_id"].to_numpy()
-        label = all_pairs.label.to_numpy()
-        org_ids = all_pairs["org_id"]
-        all_pairs.drop(columns=["user_id", "org_id", "label"], inplace=True)
-        return TrainData(all_pairs, groups, label, org_ids)
+        train_pairs.sort_values(by="user_id", inplace=True)
+        groups = train_pairs["user_id"].to_numpy()
+        label = train_pairs.label.to_numpy()
+        org_ids = train_pairs["org_id"]
+        train_pairs.drop(columns=["user_id", "org_id", "label"], inplace=True)
+        return TrainData(train_pairs, groups, label, org_ids)
 
 def train_data_to_pool(train_data:TrainData):
     return Pool(data=train_data.pairs,

@@ -8,24 +8,23 @@ pd.options.mode.chained_assignment = None  # default='warn'
 # Columns: user_id, target
 def mnap(y_true, y_predict, N=20):
     match = y_true.merge(y_predict, on='user_id')
-    assert len(match) == len(y_true)
-
+    assert len(match) > 0
     def _user_mnap(y_true, preds, N):
         preds = preds[:N]
-        scores = np.zeros_like(preds)
+        scores = np.zeros_like(preds, dtype=float)
         weights = np.array([1/idx for idx in range(1, len(preds)+1)])
         for idx, pred in enumerate(preds, 1):
             if pred in y_true:
                 scores[idx-1] = 1 
-        return np.sum(np.cumsum(scores)*scores / weights) / min(len(y_true), N)
-    return match.parallel_apply(lambda r: _user_mnap(r['target_x'],r['target_y'], N), axis=1).mean()
+        return np.sum(np.cumsum(scores)* scores * weights) / min(len(y_true), N)
+    return match.apply(lambda r: _user_mnap(r['target_x'],r['target_y'], N), axis=1).mean()
 
-def recall(y_true, y_predict,N=20):
+def recall(y_true, y_predict, N=20):
     match = y_true.merge(y_predict, on='user_id')
-    assert len(match) == len(y_true)
+    assert len(match) > 0
     def _user_recall(y_true, preds):
         return len(np.intersect1d(y_true, preds)) / (0.0001+len(y_true))
-    return match.parallel_apply(lambda r: _user_recall(r['target_x'],r['target_y'][:N]), axis=1).mean()
+    return match.parallel_apply(lambda r: _user_recall(r['target_x'],r['target_y'][:N]), axis=1)
 
 def compare_ranks(y_true, y_predict_x, y_predict_y, cols):
     match = y_true.merge(y_predict_x, on='user_id', suffixes=('_true',''))
@@ -46,9 +45,6 @@ def compare_ranks(y_true, y_predict_x, y_predict_y, cols):
     result[f'imp_{cols[0]}'] = result[f'{cols[0]}_{cols[1]}'] - result[cols[1]]
     result[f'imp_{cols[1]}'] = result[f'{cols[0]}_{cols[1]}'] - result[cols[0]]
     return result
-
-def print_score(score):
-    print(f'MNAP-score: {100*score:.2f}')
 
 
 def fallback_with_top_recs(test_reviews, orgs, N=20):
@@ -92,10 +88,22 @@ def combine_preds(train_df, ease, attrs, min_len=4):
             return pd.Series(data=(row['user_id'], row['city_e'], row['target_e']), index=index)
     return preds_combined.parallel_apply(_apply, axis=1)
 
-def concat_preds(ease, attrs):
+def concat_preds(ease, attrs, N=20):
     preds_combined = pd.merge(ease, attrs, on='user_id',suffixes=('_e','_a'))
     def _apply(row):
         index = ['user_id', 'city', 'target']
-        target = np.union1d(row.target_a, row.target_e)
+        target = np.union1d(row.target_a[:N], row.target_e[:N])
         return pd.Series(data=(row['user_id'], row['city_a'], target), index=index)
     return preds_combined.parallel_apply(_apply, axis=1)
+
+def compare_preds(new, old, true_df=None, N=20):
+    test_user = np.random.choice(new.user_id)
+    pairs1 = new[new.user_id==test_user]['target'].explode().rename("new").reset_index(drop=True)[:N]
+    pairs2 = old[old.user_id==test_user]['target'].explode().rename("old").reset_index(drop=True)[:N]
+    if true_df is not None:
+        true_items = true_df[true_df.user_id==test_user].iloc[0].target
+        print(test_user,true_items)
+        return pd.concat([pairs1,pairs1.isin(true_items),pairs2,pairs2.isin(true_items)],axis=1)
+    else:
+        print(test_user)
+        return pd.concat([pairs1,pairs2],axis=1)
