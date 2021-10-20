@@ -62,10 +62,13 @@ def prepare_reviews_i2i(reviews, orgs,
                         min_org_score):
     reviews = reviews[reviews.good>0]
 
-    reviews = reviews.merge(test_pairs, on=('user_id','org_id'), how='left', indicator=True)
-    reviews = reviews[reviews['_merge']=="left_only"]
+    if test_pairs is not None:
+        reviews = reviews.merge(test_pairs, on=('user_id','org_id'), how='left', indicator=True)
+        reviews = reviews[reviews['_merge']=="left_only"]
 
-    train_reviews = reviews.merge(train_pairs, on=('user_id','org_id'))
+    if train_pairs is not None:
+        train_reviews = reviews.merge(train_pairs, on=('user_id','org_id'))
+    
 
     reviews = reviews[reviews.org_id.isin((orgs[orgs.rating>=min_org_score]['org_id']))]
     user_agg = reviews.groupby("user_id").agg(
@@ -78,7 +81,9 @@ def prepare_reviews_i2i(reviews, orgs,
         org_travels = pd.NamedAgg(column="travel", aggfunc="sum")).reset_index()
     org_agg = org_agg[(org_agg.org_travels>=min_travels_reviews) & (org_agg.org_reviews>=min_org_reviews)]['org_id']
     reviews = reviews[reviews.org_id.isin(org_agg)]
-    reviews = pd.concat([train_reviews, reviews], ignore_index=True).drop_duplicates(('user_id','org_id'))
+    if train_pairs is not None:
+        reviews = pd.concat([train_reviews, reviews], ignore_index=True)
+    reviews.drop_duplicates(('user_id','org_id'), inplace=True)
     return (reviews, Encoders(reviews))
 
 def reviews_matrix(reviews, encoders):
@@ -86,6 +91,9 @@ def reviews_matrix(reviews, encoders):
     org_idx = encoders.encode_orgs(reviews['org_id'])
     data = np.ones_like(users_idx)
     return sparse.coo_matrix((data, (users_idx, org_idx))).tocsr()
+
+# def normalize_i2i(sparse_mat):
+#     mean_vec = 
 
 def filter_by_min_value(CC_mat, min_value):
     CC_mat = CC_mat.copy()

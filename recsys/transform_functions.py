@@ -45,15 +45,15 @@ def train_test_split(reviews, min_ts):
     test_users = test_reviews.user_id.unique()
     
     train_reviews = reviews[(reviews.good > 0) & \
-                            (reviews.ts <= min_ts) & \
+                            (reviews.ts < min_ts) & \
                             reviews.user_id.isin(test_users)]
     train_reviews = train_reviews.groupby(['user_id','user_city'])['org_id']\
         .aggregate(list).reset_index().rename(columns={'user_city':'city'})
     
     test_users = train_reviews.user_id.unique()
 
-    test_reviews = test_reviews[test_reviews.user_id.isin(test_users)][['user_id','org_id']]\
-        .groupby('user_id')['org_id']\
-        .aggregate(list).reset_index().rename(columns={'org_id':"target"})
+    test_reviews = test_reviews[test_reviews.user_id.isin(test_users)][['user_id','user_city','org_id']]\
+        .groupby(['user_id','user_city'])['org_id']\
+        .aggregate(list).reset_index().rename(columns={'org_id':"target",'user_city':'city'})
 
     return train_reviews, test_reviews

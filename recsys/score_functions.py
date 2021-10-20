@@ -88,6 +88,9 @@ def combine_preds(train_df, ease, attrs, min_len=4):
             return pd.Series(data=(row['user_id'], row['city_e'], row['target_e']), index=index)
     return preds_combined.parallel_apply(_apply, axis=1)
 
+def strip_preds(preds):
+    preds['target'] = preds.target.apply(lambda t: t[:20])
+
 def concat_preds(ease, attrs, N=20):
     preds_combined = pd.merge(ease, attrs, on='user_id',suffixes=('_e','_a'))
     def _apply(row):
